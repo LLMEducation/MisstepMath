@@ -25,9 +25,7 @@ MisstepMath/
 │   ├── 1_dataset_generation.ipynb
 │   ├── 2_fine_tuning_setup.ipynb
 │   └── 3_RAG_baseline_setup.ipynb
-├── scripts/
-│   ├── rag_retriever.py
-│   └── utils.py
+
 ```
 
 ## Usage Instructions:
