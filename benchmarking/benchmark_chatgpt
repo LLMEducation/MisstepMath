@@ -1,0 +1,112 @@
+import os
+import json
+import pandas as pd
+import time
+import openai
+from openai import OpenAI
+
+
+# Define file paths
+combinations_file_path = "MisstepMath/benchmark/benchmark_data/benchmark_combinations.csv"
+output_dir = "MisstepMath/benchmark/benchmark_results/"
+os.makedirs(output_dir, exist_ok=True)
+
+# Load benchmark combinations
+df_combinations = pd.read_csv(combinations_file_path)
+print(f" Loaded benchmark combinations from: {combinations_file_path}")
+
+# API Configurations
+secret_key = '<openai secret-id>'
+organization_id = '<openai org-id>'
+openai.organization = organization_id
+openai.api_key = secret_key
+os.environ["OPENAI_API_KEY"] = secret_key
+client = OpenAI(organization=organization_id)
+
+models = {
+    "GPT-4-Mini": "gpt-4o-mini"
+}
+
+sample_json_response = {
+    "challenge_type": "Conceptual misunderstanding",
+    "student_mistake": "The student incorrectly applies the distributive property."
+}
+
+def check_sample_count(model_name, grade, topic, sub_topic):
+    model_dir = os.path.join(output_dir, model_name.replace(" ", "_"))
+    raw_file = os.path.join(model_dir, "raw_responses.jsonl")
+    if os.path.exists(raw_file):
+        with open(raw_file, "r") as f:
+            lines = f.readlines()
+            count = sum(1 for line in lines if f'"Grade": "{grade}", "Topic": "{topic}", "Sub-topic": "{sub_topic}"' in line)
+            return count
+    return 0
+
+def query_model(model_name, model_id, prompt):
+    try:
+        response = client.chat.completions.create(
+            model=model_id,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=200
+        )
+        content = response.choices[0].message.content.strip()
+        print(content)
+        if "```json" in content:
+          o = content.split("```json")[1].split("```")[0]
+        else:
+          o = content
+        json_response = json.loads(o)  # Ensure valid JSON response
+        return json_response
+    except Exception as e:
+        return {"challenge_type": "Error", "student_mistake": str(e)}
+
+def process_combination(grade, topic, sub_topic):
+    prompt_template = (f"A grade {grade} student is attempting a problem in {sub_topic} under {topic}. "
+                        "Simulate a natural student response, considering diverse possible misunderstandings or mistakes they may have. "
+                        "Provide the response in a valid JSON format only, following this structure: "
+                        f"{json.dumps(sample_json_response)}\n")
+
+    for model_name, model_id in models.items():
+        #sample_count = check_sample_count(model_name, grade, topic, sub_topic)
+        #print(sample_count, grade, topic, sub_topic)
+        #if sample_count >= 100:
+        #   print(f" 100 samples already exist for Grade={grade}, Topic={topic}, Sub-topic={sub_topic}. Skipping...")
+        #   continue  # Skip if 100 samples are already collected
+
+        for i in range(100):
+            print(f"Processing sample {i+1}/100: Model={model_name}, Grade={grade}, Topic={topic}, Sub-topic={sub_topic}")
+            response = query_model(model_name, model_id, prompt_template)
+            print(response)
+
+            model_dir = os.path.join(output_dir, model_name.replace(" ", "_"))
+            os.makedirs(model_dir, exist_ok=True)
+
+            raw_file = os.path.join(model_dir, "raw_responses.jsonl")
+            with open(raw_file, "a") as f:
+                json.dump({"Sample": i+1, "Grade": grade, "Topic": topic, "Sub-topic": sub_topic, "Response": response}, f)
+                f.write("\n")
+
+            extracted_file = os.path.join(model_dir, "extracted_data.csv")
+            extracted_data = pd.DataFrame([{
+                "Sample": i+1,
+                "Grade": grade,
+                "Topic": topic,
+                "Sub-topic": sub_topic,
+                "Challenge Type": response.get("challenge_type", ""),
+                "Student Mistake": response.get("student_mistake", "")
+            }])
+
+            if not os.path.exists(extracted_file):
+                extracted_data.to_csv(extracted_file, index=False)
+            else:
+                extracted_data.to_csv(extracted_file, mode='a', header=False, index=False)
+
+            print(f" Extracted data saved for {model_name}, Sample {i+1}/100")
+
+def main():
+    for _, row in df_combinations.iterrows():
+        process_combination(row["Grade"], row["Topic"], row["Sub Topic"])
+
+if __name__ == "__main__":
+    main()
+    print(" Benchmarking complete. Results saved.")
